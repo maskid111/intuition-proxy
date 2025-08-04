@@ -16,7 +16,11 @@ app.use(express.json());
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  res.status(200).json({ 
+    status: "ok", 
+    message: "Intuition Proxy Service is running",
+    timestamp: new Date().toISOString() 
+  });
 });
 
 // GraphQL proxy endpoint
@@ -25,36 +29,62 @@ app.post("/claim-proxy", async (req, res) => {
     // Validate request
     if (!req.body || !req.body.query) {
       return res.status(400).json({ 
-        errors: [{ message: "Invalid request format" }] 
+        errors: [{ 
+          message: "Invalid request format - missing query" 
+        }] 
       });
     }
+
+    // Prepare headers (add authentication if needed)
+    const headers = {
+      "Content-Type": "application/json",
+      // "x-hasura-admin-secret": process.env.HASURA_SECRET
+    };
 
     // Forward to Intuition API
     const apiResponse = await fetch("https://prod.base-mainnet-v-1-0.intuition.sh/v1/graphql", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // Add any required authentication headers here
-        // "x-hasura-admin-secret": process.env.HASURA_SECRET
-      },
+      headers,
       body: JSON.stringify(req.body)
     });
 
     const result = await apiResponse.json();
 
-    if (!apiResponse.ok) {
-      console.error("API Error:", result);
-      return res.status(apiResponse.status).json(result);
+    // Handle GraphQL errors
+    if (result.errors) {
+      console.error("GraphQL Errors:", result.errors);
+      return res.status(400).json(result);
     }
 
+    // Handle HTTP errors
+    if (!apiResponse.ok) {
+      return res.status(apiResponse.status).json({
+        errors: [{
+          message: `API responded with ${apiResponse.status}`,
+          details: result
+        }]
+      });
+    }
+
+    // Successful response
     res.json(result);
 
   } catch (error) {
     console.error("Proxy Error:", error);
     res.status(500).json({ 
-      errors: [{ message: "Internal server error" }] 
+      errors: [{ 
+        message: "Internal server error",
+        details: error.message 
+      }] 
     });
   }
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    errors: [{ message: "Endpoint not found" }] 
+  });
 });
 
 // Error handling middleware
@@ -67,4 +97,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Health check at http://localhost:${PORT}/health`);
 });
